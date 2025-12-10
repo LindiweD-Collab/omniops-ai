@@ -4,31 +4,27 @@ import { supabase } from '@/lib/supabaseClient'
 import { generateAIContent } from '@/app/actions/ai'
 import { 
   LayoutDashboard, Users, FileText, Bot, Plus, Trash2, 
-  Save, Check, Loader2, FormInput, ExternalLink, Inbox, Calendar 
+  Save, Check, Loader2, FormInput, ExternalLink, Inbox, Calendar,
+  ArrowRight, ArrowLeft 
 } from 'lucide-react'
 
-// --- Types ---
 type FormField = { label: string; type: 'text' | 'textarea' | 'checkbox'; id: string }
 type Item = { id: string; title: string; description: string; status: string; category: string }
 type Submission = { id: string; form_id: string; data: Record<string, any>; created_at: string; form_title?: string }
 
 export default function Dashboard() {
-  // --- State ---
+
   const [view, setView] = useState('dashboard')
   const [items, setItems] = useState<Item[]>([])
   const [loadingAI, setLoadingAI] = useState(false)
   const [newItemTitle, setNewItemTitle] = useState('')
-  
-  // Form Builder State
   const [forms, setForms] = useState<any[]>([])
   const [currentFormFields, setCurrentFormFields] = useState<FormField[]>([])
   const [formTitle, setFormTitle] = useState('')
 
-  // Inbox State
   const [submissions, setSubmissions] = useState<Submission[]>([])
   const [selectedSubmission, setSelectedSubmission] = useState<Submission | null>(null)
 
-  // --- Initial Data Fetch ---
   useEffect(() => {
     fetchItems()
     fetchForms()
@@ -36,7 +32,8 @@ export default function Dashboard() {
   }, [])
 
   const fetchItems = async () => {
-    let { data } = await supabase.from('items').select('*')
+
+    let { data } = await supabase.from('items').select('*').order('created_at', { ascending: false })
     if (data) setItems(data)
   }
 
@@ -46,29 +43,23 @@ export default function Dashboard() {
   }
 
   const fetchSubmissions = async () => {
-    // Fetch submissions AND the related form title
     let { data, error } = await supabase
       .from('submissions')
-      .select(`
-        *,
-        forms ( title, fields )
-      `)
+      .select(`*, forms ( title, fields )`)
       .order('created_at', { ascending: false })
 
     if (error) console.error(error)
     
-    // Flatten the structure for easier usage
     if (data) {
       const formatted = data.map((sub: any) => ({
         ...sub,
         form_title: sub.forms?.title,
-        form_fields: sub.forms?.fields // We need this to map Question IDs to Labels
+        form_fields: sub.forms?.fields
       }))
       setSubmissions(formatted)
     }
   }
 
-  // --- Logic: CRM & AI ---
   const handleCreateItem = async (withAI: boolean) => {
     if (!newItemTitle) return
     setLoadingAI(true)
@@ -93,12 +84,44 @@ export default function Dashboard() {
       .insert([{ title: newItemTitle, description, category, status }])
       .select()
 
-    if (data) setItems([...items, data[0]])
+    if (data) setItems([data[0], ...items]) 
     setNewItemTitle('')
     setLoadingAI(false)
   }
 
-  // --- Logic: Form Builder ---
+  const handleDelete = async (id: string) => {
+    if (!confirm("Are you sure you want to delete this?")) return
+
+    setItems(items.filter(i => i.id !== id))
+
+    await supabase.from('items').delete().eq('id', id)
+  }
+
+  const handleMove = async (item: Item, direction: 'next' | 'prev') => {
+    const pipeline = ['lead-new', 'negotiation', 'lead-won']
+    const currentIndex = pipeline.indexOf(item.status)
+    
+    let newStatus = item.status
+
+    if (direction === 'next' && currentIndex < pipeline.length - 1) {
+      newStatus = pipeline[currentIndex + 1]
+    } else if (direction === 'prev' && currentIndex > 0) {
+      newStatus = pipeline[currentIndex - 1]
+    }
+
+    if (newStatus !== item.status) {
+
+      setItems(items.map(i => i.id === item.id ? { ...i, status: newStatus } : i))
+      await supabase.from('items').update({ status: newStatus }).eq('id', item.id)
+    }
+  }
+
+  const toggleTaskStatus = async (item: Item) => {
+    const newStatus = item.status === 'done' ? 'todo' : 'done'
+    setItems(items.map(i => i.id === item.id ? { ...i, status: newStatus } : i))
+    await supabase.from('items').update({ status: newStatus }).eq('id', item.id)
+  }
+
   const addFieldToForm = (type: 'text' | 'textarea' | 'checkbox') => {
     setCurrentFormFields([...currentFormFields, { label: 'New Field', type, id: crypto.randomUUID() }])
   }
@@ -123,8 +146,7 @@ export default function Dashboard() {
 
   return (
     <div className="flex h-screen bg-slate-50 text-slate-800 font-sans">
-      
-      {/* --- SIDEBAR --- */}
+
       <aside className="w-64 bg-slate-900 text-white flex flex-col shadow-2xl z-10">
         <div className="p-6">
           <h1 className="text-2xl font-bold bg-gradient-to-r from-indigo-400 to-cyan-400 bg-clip-text text-transparent">
@@ -149,10 +171,8 @@ export default function Dashboard() {
         </div>
       </aside>
 
-      {/* --- MAIN CONTENT --- */}
       <main className="flex-1 p-8 overflow-y-auto">
-        
-        {/* HEADER */}
+
         <header className="flex justify-between items-center mb-8">
           <div>
             <h2 className="text-3xl font-bold text-slate-900 capitalize tracking-tight">{view.replace('-', ' ')}</h2>
@@ -179,19 +199,25 @@ export default function Dashboard() {
           )}
         </header>
 
-        {/* --- VIEW: OPERATIONS DASHBOARD --- */}
         {view === 'dashboard' && (
           <div className="grid grid-cols-1 gap-4">
             {items.filter(i => i.category === 'task').map(item => (
               <div key={item.id} className="bg-white p-5 rounded-xl border border-slate-100 shadow-sm hover:shadow-md transition-all flex justify-between items-start group">
-                <div className="flex-1">
-                  <div className="flex items-center gap-3">
-                    <div className={`w-2 h-2 rounded-full ${item.status === 'done' ? 'bg-green-500' : 'bg-orange-500'}`}></div>
-                    <h3 className="font-semibold text-lg text-slate-800">{item.title}</h3>
+                <div className="flex-1 flex gap-4">
+
+                  <button 
+                    onClick={() => toggleTaskStatus(item)}
+                    className={`mt-1 w-5 h-5 rounded-full border flex items-center justify-center transition-colors ${item.status === 'done' ? 'bg-green-500 border-green-500 text-white' : 'border-slate-300 hover:border-indigo-500'}`}
+                  >
+                    {item.status === 'done' && <Check size={12}/>}
+                  </button>
+                  <div>
+                    <h3 className={`font-semibold text-lg text-slate-800 ${item.status === 'done' ? 'line-through text-slate-400' : ''}`}>{item.title}</h3>
+                    <p className="mt-2 text-slate-600 text-sm whitespace-pre-wrap">{item.description}</p>
                   </div>
-                  <p className="mt-2 text-slate-600 text-sm whitespace-pre-wrap pl-5">{item.description}</p>
                 </div>
-                <button className="opacity-0 group-hover:opacity-100 text-slate-400 hover:text-red-500 transition-opacity">
+
+                <button onClick={() => handleDelete(item.id)} className="opacity-0 group-hover:opacity-100 text-slate-300 hover:text-red-500 transition-all">
                   <Trash2 size={18} />
                 </button>
               </div>
@@ -202,27 +228,57 @@ export default function Dashboard() {
           </div>
         )}
 
-        {/* --- VIEW: CRM PIPELINE --- */}
         {view === 'crm' && (
           <div className="flex gap-6 h-[calc(100vh-200px)] overflow-x-auto pb-4">
             {['lead-new', 'negotiation', 'lead-won'].map(status => (
               <div key={status} className="min-w-[320px] bg-slate-100 rounded-xl p-4 flex flex-col">
                 <div className="flex justify-between items-center mb-4 px-2">
-                  <span className="uppercase text-xs font-bold text-slate-500 tracking-wider">{status.replace('lead-', '')}</span>
+                  <span className="uppercase text-xs font-bold text-slate-500 tracking-wider">{status.replace('lead-', '').replace('-', ' ')}</span>
                   <span className="bg-slate-200 text-slate-600 text-xs px-2 py-1 rounded-full">
                     {items.filter(i => i.category === 'lead' && i.status === status).length}
                   </span>
                 </div>
                 <div className="space-y-3 overflow-y-auto flex-1 pr-2 custom-scrollbar">
                   {items.filter(i => i.category === 'lead' && i.status === status).map(item => (
-                    <div key={item.id} className="bg-white p-4 rounded-lg border border-slate-200 shadow-sm cursor-grab active:cursor-grabbing hover:ring-2 hover:ring-indigo-500/20 transition-all">
+                    <div key={item.id} className="bg-white p-4 rounded-lg border border-slate-200 shadow-sm hover:shadow-md transition-all">
+                      
                       <div className="font-bold text-slate-800 mb-1">{item.title}</div>
+                      
                       {item.description && (
                         <div className="text-xs bg-indigo-50 text-indigo-700 p-2 rounded mt-2 border border-indigo-100">
                           <Bot size={12} className="inline mr-1 mb-0.5"/>
                           {item.description.slice(0, 100)}...
                         </div>
                       )}
+
+                      <div className="mt-4 pt-3 border-t border-slate-100 flex justify-between items-center">
+                         <button 
+                           onClick={() => handleDelete(item.id)}
+                           className="text-slate-400 hover:text-red-500 transition-colors p-1" title="Delete Lead"
+                         >
+                           <Trash2 size={14}/>
+                         </button>
+                         
+                         <div className="flex gap-2">
+                           {status !== 'lead-new' && (
+                             <button 
+                               onClick={() => handleMove(item, 'prev')}
+                               className="bg-slate-100 hover:bg-slate-200 text-slate-600 p-1.5 rounded text-xs flex items-center gap-1"
+                             >
+                               <ArrowLeft size={12}/> Back
+                             </button>
+                           )}
+                           {status !== 'lead-won' && (
+                             <button 
+                               onClick={() => handleMove(item, 'next')}
+                               className="bg-indigo-50 hover:bg-indigo-100 text-indigo-700 p-1.5 rounded text-xs flex items-center gap-1 font-medium"
+                             >
+                               Next <ArrowRight size={12}/>
+                             </button>
+                           )}
+                         </div>
+                      </div>
+
                     </div>
                   ))}
                 </div>
@@ -231,11 +287,10 @@ export default function Dashboard() {
           </div>
         )}
 
-        {/* --- VIEW: FORM BUILDER --- */}
         {view === 'forms' && (
           <div className="flex gap-8 h-full">
             <div className="w-1/3 flex flex-col gap-6">
-              {/* Editor */}
+
               <div className="bg-white rounded-xl shadow-lg border border-slate-200 flex flex-col flex-1">
                 <div className="p-5 border-b border-slate-100">
                   <h3 className="font-bold text-lg mb-4">Form Editor</h3>
@@ -274,7 +329,6 @@ export default function Dashboard() {
                 </div>
               </div>
 
-               {/* Saved Forms List */}
               <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-5">
                 <h4 className="font-bold text-sm text-slate-500 uppercase mb-3">Your Saved Forms</h4>
                 <div className="space-y-2 max-h-40 overflow-y-auto">
@@ -295,7 +349,6 @@ export default function Dashboard() {
               </div>
             </div>
 
-            {/* Preview Panel */}
             <div className="flex-1 bg-slate-100 rounded-xl p-8 flex flex-col items-center justify-center border-2 border-dashed border-slate-300">
               <div className="w-full max-w-md bg-white shadow-xl rounded-xl p-8 min-h-[400px]">
                  <div className="mb-6">
@@ -318,10 +371,9 @@ export default function Dashboard() {
           </div>
         )}
 
-        {/* --- VIEW: SUBMISSIONS INBOX --- */}
         {view === 'inbox' && (
           <div className="flex gap-6 h-full">
-            {/* List of Submissions */}
+
             <div className="w-1/3 bg-white rounded-xl shadow-sm border border-slate-200 flex flex-col overflow-hidden">
                <div className="p-4 border-b border-slate-100 bg-slate-50">
                  <h3 className="font-bold text-slate-700">Recent Submissions</h3>
@@ -348,7 +400,6 @@ export default function Dashboard() {
                </div>
             </div>
 
-            {/* Submission Detail View */}
             <div className="flex-1 bg-white rounded-xl shadow-sm border border-slate-200 p-8 overflow-y-auto">
                {!selectedSubmission ? (
                  <div className="h-full flex flex-col items-center justify-center text-slate-300">
@@ -371,7 +422,7 @@ export default function Dashboard() {
                     </div>
 
                     <div className="space-y-6">
-                      {/* Mapping Answers to Questions */}
+
                       {(selectedSubmission as any).form_fields?.map((field: any) => {
                         const answer = selectedSubmission.data[field.id]
                         return (
@@ -383,7 +434,7 @@ export default function Dashboard() {
                           </div>
                         )
                       })}
-                      {/* Fallback if form fields have changed since submission */}
+                     
                       {!(selectedSubmission as any).form_fields && (
                         <div className="text-red-400 text-sm">
                           Form definition missing or changed. Raw Data: {JSON.stringify(selectedSubmission.data)}
@@ -401,7 +452,6 @@ export default function Dashboard() {
   )
 }
 
-// --- Helper Components ---
 function NavButton({ active, onClick, icon, label }: any) {
   return (
     <button 
